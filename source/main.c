@@ -186,9 +186,12 @@ int main(int argc, char **argv) {
   SOC_buffer = (u32*)memalign(SOC_ALIGN, SOC_BUFFERSIZE);
   SOC_Initialize(SOC_buffer, SOC_BUFFERSIZE);
 
+  struct in_addr host;
+  host.s_addr = gethostid();
+
+  printf("3dslink: %s:%d\n",inet_ntoa(host),17491);
+
   int sock_udp = socket(AF_INET, SOCK_DGRAM, 0);
-  printf("socket: %d\n",sock_udp);
-  perror(NULL);
 
   struct sockaddr_in sa_udp, sa_udp_remote;
 
