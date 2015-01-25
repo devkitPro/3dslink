@@ -1,0 +1,6 @@
+*.elf
+*.smdh
+*.3dsx
+Release
+Debug
+build
