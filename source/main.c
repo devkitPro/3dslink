@@ -65,6 +65,10 @@ int recvall(int sock, void *buffer, int size, int flags) {
 	return size;
 }
 
+char *executablePath = NULL;
+int cmdlen = 0;
+char *commandline = NULL;
+void __appExit();
 
 //---------------------------------------------------------------------------------
 int load3DSX(int sock, u32 remote) {
@@ -123,8 +127,8 @@ int load3DSX(int sock, u32 remote) {
   close(fd);
 
   FILE *file = fopen(filename,"wb");
-  char *writebuffer=malloc(16384);
-  setvbuf(file,writebuffer,_IOFBF, 16384);
+  char *writebuffer=malloc(65536);
+  setvbuf(file,writebuffer,_IOFBF, 65536);
   if (response == 0) {
     printf("transferring %s\n%d bytes.\n", filename, filelen);
 
@@ -162,11 +166,10 @@ int load3DSX(int sock, u32 remote) {
 
     printf("\r100%%\n");
     gfxFlushBuffers();
-    int cmdlen = 0;
     len = recvall(sock,(char*)&cmdlen,4,0);
     if (cmdlen) {
-      uint8_t *cmdline = malloc(cmdlen);
-      len = recvall(sock, cmdline, cmdlen,0);
+      commandline = malloc(cmdlen);
+      len = recvall(sock, commandline, cmdlen,0);
     }
   }
 
@@ -174,10 +177,25 @@ int load3DSX(int sock, u32 remote) {
   free(writebuffer);
   fclose(file);
 
+  if (response == 0) {
+    executablePath=getcwd(NULL,0);
+    strcat(executablePath,filename);
+
+    executablePath = strchr(executablePath,'/');
+    printf("%s\n", executablePath);
+
+    char *ptr = commandline;
+    while (ptr < commandline + cmdlen) {
+      char *arg = ptr;
+      printf("%s\n",arg);
+      ptr += strlen(arg) + 1;
+    }
+  }
   return response;
 }
 
 static u32 *SOC_buffer = NULL;
+static FS_archive sdmcArchive;
 
 int main(int argc, char **argv) {
   gfxInitDefault();
@@ -236,9 +254,14 @@ int main(int argc, char **argv) {
 		int sock_tcp_remote = accept(sock_tcp,(struct sockaddr *)&sa_tcp,&fromlen);
 
 		if (sock_tcp_remote != -1) {
-			load3DSX(sock_tcp_remote,sa_tcp.sin_addr.s_addr);
+			int result = load3DSX(sock_tcp_remote,sa_tcp.sin_addr.s_addr);
 			close(sock_tcp_remote);
-		}
+/*			if (result==0) {
+        close(sock_tcp);
+        close(sock_udp);
+        break;
+			}
+*/		}
 
     gspWaitForVBlank();
     hidScanInput();
@@ -260,5 +283,26 @@ int main(int argc, char **argv) {
   free(SOC_buffer);
 
   gfxExit();
+
+/*  if (executablePath != NULL) {
+    HB_GetBootloaderAddresses((void**)&callBootloader, (void**)&setArgs);
+    hbExit();
+    __appExit();
+
+    fsInit();
+    sdmcArchive=(FS_archive){0x00000009, (FS_path){PATH_EMPTY, 1, (u8*)""}};
+    FSUSER_OpenFileDirectly(NULL, &hbHandle, sdmcArchive, FS_makePath(PATH_CHAR, executablePath), FS_OPEN_READ, FS_ATTRIBUTE_NONE);
+    fsExit();
+
+	//set argv/argc
+	static u32 argbuffer[0x200];
+	argbuffer[0]=1;
+	snprintf((char*)&argbuffer[1], 0x200*4, "sdmc:%s", executablePath);
+	setArgs(argbuffer, 0x200*4);
+
+    __system_retAddr = launchFile;
+
+  }
+*/
   return 0;
 }
