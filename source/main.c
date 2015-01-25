@@ -33,7 +33,7 @@ static void launchFile(void)
 
 
 static int set_socket_nonblocking(int fd) {
-  int rc, flags;
+  int flags;
 
   flags = fcntl(fd, F_GETFL, 0);
   fcntl(fd, F_SETFL, flags | O_NONBLOCK);
@@ -184,12 +184,6 @@ int load3DSX(int sock, u32 remote) {
     executablePath = strchr(executablePath,'/');
     printf("%s\n", executablePath);
 
-    char *ptr = commandline;
-    while (ptr < commandline + cmdlen) {
-      char *arg = ptr;
-      printf("%s\n",arg);
-      ptr += strlen(arg) + 1;
-    }
   }
   return response;
 }
@@ -198,6 +192,7 @@ static u32 *SOC_buffer = NULL;
 static FS_archive sdmcArchive;
 
 int main(int argc, char **argv) {
+  hbInit();
   gfxInitDefault();
   consoleInit(GFX_TOP,NULL);
 
@@ -256,12 +251,12 @@ int main(int argc, char **argv) {
 		if (sock_tcp_remote != -1) {
 			int result = load3DSX(sock_tcp_remote,sa_tcp.sin_addr.s_addr);
 			close(sock_tcp_remote);
-/*			if (result==0) {
+			if (result==0) {
         close(sock_tcp);
         close(sock_udp);
         break;
 			}
-*/		}
+		}
 
     gspWaitForVBlank();
     hidScanInput();
@@ -278,31 +273,45 @@ int main(int argc, char **argv) {
   }
 
   Result ret = SOC_Shutdown();
-  if(ret != 0)
-    printf("SOC_Shutdown: 0x%08X\n", (unsigned int)ret);
+
+  if(ret != 0) printf("SOC_Shutdown: 0x%08X\n", (unsigned int)ret);
+
   free(SOC_buffer);
 
-  gfxExit();
 
-/*  if (executablePath != NULL) {
+  if (executablePath != NULL) {
     HB_GetBootloaderAddresses((void**)&callBootloader, (void**)&setArgs);
     hbExit();
-    __appExit();
+    sdmcExit();
+    fsExit();
 
     fsInit();
     sdmcArchive=(FS_archive){0x00000009, (FS_path){PATH_EMPTY, 1, (u8*)""}};
     FSUSER_OpenFileDirectly(NULL, &hbHandle, sdmcArchive, FS_makePath(PATH_CHAR, executablePath), FS_OPEN_READ, FS_ATTRIBUTE_NONE);
+
     fsExit();
 
-	//set argv/argc
-	static u32 argbuffer[0x200];
-	argbuffer[0]=1;
-	snprintf((char*)&argbuffer[1], 0x200*4, "sdmc:%s", executablePath);
-	setArgs(argbuffer, 0x200*4);
+    //set argv/argc
+    static u32 argbuffer[0x200];
+
+    argbuffer[0]=0;
+    char *ptr = commandline;
+    char *dst = (char*)&argbuffer[1];
+    while (ptr < commandline + cmdlen) {
+      char *arg = ptr;
+      strcpy(dst,ptr);
+      ptr += strlen(arg) + 1;
+      dst += strlen(arg) + 1;
+      argbuffer[0]++;
+    }
+
+    setArgs(argbuffer, 0x200*4);
 
     __system_retAddr = launchFile;
 
   }
-*/
+
+  gfxExit();
+
   return 0;
 }
