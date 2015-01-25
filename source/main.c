@@ -120,6 +120,11 @@ int load3DSX(int sock, u32 remote) {
 
   send(sock,(int *)&response,sizeof(response),0);
 
+  close(fd);
+
+  FILE *file = fopen(filename,"wb");
+  char *writebuffer=malloc(16384);
+  setvbuf(file,writebuffer,_IOFBF, 16384);
   if (response == 0) {
     printf("transferring %s\n%d bytes.\n", filename, filelen);
 
@@ -127,22 +132,34 @@ int load3DSX(int sock, u32 remote) {
     size_t sizeleft = filelen, target = filelen - chunksize;
 
     while(sizeleft) {
-      len = recvall(sock,filebuffer,chunksize,0);
+      len = recv(sock,filebuffer,chunksize,0);
 
       if (len == 0) break;
 
-      sizeleft -= len;
+      if (len == -1) {
+        if (errno != EWOULDBLOCK && errno != EAGAIN) {
+          printf("\n");
+          perror(NULL);
+          break;
+        }
+      } else {
+        sizeleft -= len;
 
-      if (sizeleft <= target) {
-        percent++;
-        target -= chunksize;
-        if (target<0) target = 0;
+        if (sizeleft <= target) {
+          percent++;
+          target -= chunksize;
+
+          if (target<0) target = 0;
+        }
+
+        fwrite(filebuffer,1,len,file);
+        printf("\r%d%%  ",percent);
+        gfxFlushBuffers();
       }
-      write(fd,filebuffer,len);
-      printf("\r%d%%  ",percent);
-      gfxFlushBuffers();
+
       if ( sizeleft < chunksize) chunksize = sizeleft;
     }
+
     printf("\r100%%\n");
     gfxFlushBuffers();
     int cmdlen = 0;
@@ -154,7 +171,8 @@ int load3DSX(int sock, u32 remote) {
   }
 
   free(filebuffer);
-  close(fd);
+  free(writebuffer);
+  fclose(file);
 
   return response;
 }
