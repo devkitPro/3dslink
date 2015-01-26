@@ -225,7 +225,7 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, char *buffer) {
 	if (connect(sock,(struct sockaddr *)&s,sizeof(s)) < 0 ) {
 		struct in_addr address;
 		address.s_addr = dsaddr;
-		fprintf(stderr,"Connection to %s failed",inet_ntoa(address));
+		fprintf(stderr,"Connection to %s failed\n",inet_ntoa(address));
 		free(buffer);
 		return -1;
 	}
