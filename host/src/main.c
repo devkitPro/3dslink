@@ -361,7 +361,7 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 	assert(ret == Z_STREAM_END);        /* stream will be complete */
 	(void)deflateEnd(&strm);
 
-	printf("%u sent (%d%%), %d blocks\n",totalsent, (totalsent * 100)/ filesize, blocks);
+	printf("%u sent (%.2f%%), %d blocks\n",totalsent, (float)(totalsent * 100.0)/ filesize, blocks);
 
 	if(recvInt32LE(sock,&response)!=0) {
 		fprintf(stderr,"Failed sending %s\n",name);
