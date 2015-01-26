@@ -17,6 +17,11 @@ typedef int socklen_t;
 typedef uint32_t in_addr_t;
 #endif
 
+#include <zlib.h>
+#include <assert.h>
+
+#define ZLIB_CHUNK (32 * 1024)
+
 char cmdbuf[3072];
 uint32_t cmdlen=0;
 
@@ -141,35 +146,60 @@ static struct in_addr find3DS() {
 }
 
 //---------------------------------------------------------------------------------
-int sendData(int socket, int sendsize, char *buffer) {
+int sendData(int sock, int sendsize, char *buffer) {
 //---------------------------------------------------------------------------------
 	while(sendsize) {
-		int len = send(socket, buffer, sendsize, 0);
-		if (len <= 0) break;
-		sendsize -= len;
-		buffer += len;
+		int len = send(sock, buffer, sendsize, 0);
+		if (len == 0) break;
+		if (len != -1) {
+			sendsize -= len;
+			buffer += len;
+		} else {
+#ifdef _WIN32
+			int errcode = WSAGetLastError();
+			if (errcode != WSAEWOULDBLOCK) {
+				printf("error %d\n",errcode);
+				break;
+			}
+#else
+			if ( errno != EWOULDBLOCK && errno != EAGAIN) {
+				perror(NULL);
+				break;
+			}
+#endif
+		}
 	}
 	return sendsize != 0;
 }
 
 //---------------------------------------------------------------------------------
-int recvData(int socket, char *buffer, int size, int flags) {
+int recvData(int sock, char *buffer, int size, int flags) {
 //---------------------------------------------------------------------------------
 	int len, sizeleft = size;
 
 	while (sizeleft) {
-		len = recv(socket,buffer,sizeleft,flags);
+		len = recv(sock,buffer,sizeleft,flags);
 		if (len == 0) {
 			size = 0;
 			break;
-		};
-		if (len == -1) {
-			len = 0;
-			size = 0;
-			break;
 		}
-		sizeleft -=len;
-		buffer +=len;
+		if (len != -1) {
+			sizeleft -=len;
+			buffer +=len;
+		} else {
+#ifdef _WIN32
+			int errcode = WSAGetLastError();
+			if (errcode != WSAEWOULDBLOCK) {
+				printf("error %d\n",errcode);
+				break;
+			}
+#else
+			if ( errno != EWOULDBLOCK && errno != EAGAIN) {
+				perror(NULL);
+				break;
+			}
+#endif
+		}
 	}
 	return size;
 }
@@ -202,17 +232,29 @@ int recvInt32LE(int socket, int32_t *data) {
 
 }
 
+unsigned char in[ZLIB_CHUNK];
+unsigned char out[ZLIB_CHUNK];
+
 //---------------------------------------------------------------------------------
-int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, char *buffer) {
+int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 //---------------------------------------------------------------------------------
 
 	int retval = 0;
 
+	int ret, flush;
+	unsigned have;
+	z_stream strm;
+
+	/* allocate deflate state */
+	strm.zalloc = Z_NULL;
+	strm.zfree = Z_NULL;
+	strm.opaque = Z_NULL;
+	ret = deflateInit(&strm, Z_DEFAULT_COMPRESSION);
+	if (ret != Z_OK) return ret;
 
 	int sock = socket(AF_INET,SOCK_STREAM,0);
 	if (sock < 0) {
 		perror("create connection socket");
-		free (buffer);
 		return -1;
 	}
 
@@ -226,7 +268,6 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, char *buffer) {
 		struct in_addr address;
 		address.s_addr = dsaddr;
 		fprintf(stderr,"Connection to %s failed\n",inet_ntoa(address));
-		free(buffer);
 		return -1;
 	}
 
@@ -276,13 +317,51 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, char *buffer) {
 
 	printf("Sending %s, %d bytes\n",name, filesize);
 
-	if(sendData(sock,filesize,buffer)) {
 
-		fprintf(stderr,"Failed sending %s\n", name);
+	do {
+		strm.avail_in = fread(in, 1, ZLIB_CHUNK, fh);
+		if (ferror(fh)) {
+			(void)deflateEnd(&strm);
+			return Z_ERRNO;
+		}
+		flush = feof(fh) ? Z_FINISH : Z_NO_FLUSH;
+		strm.next_in = in;
+		/* run deflate() on input until output buffer not full, finish
+		   compression if all of source has been read in */
+		do {
+			strm.avail_out = ZLIB_CHUNK;
+			strm.next_out = out;
+			ret = deflate(&strm, flush);    /* no bad return value */
+			assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
+			have = ZLIB_CHUNK - strm.avail_out;
+
+			if (have != 0) {
+				if (sendInt32LE(sock,have)) {
+					fprintf(stderr,"Failed sending chunk size\n");
+					retval = -1;
+					goto error;
+				}
+
+				if(sendData(sock,have,out)) {
+					fprintf(stderr,"Failed sending %s\n", name);
+					retval = 1;
+					(void)deflateEnd(&strm);
+					goto error;
+				}
+			}
+		} while (strm.avail_out == 0);
+		assert(strm.avail_in == 0);     /* all input will be used */
+		/* done when last data in file processed */
+	} while (flush != Z_FINISH);
+	assert(ret == Z_STREAM_END);        /* stream will be complete */
+	(void)deflateEnd(&strm);
+
+	if(recvInt32LE(sock,&response)!=0) {
+		fprintf(stderr,"Failed sending %s\n",name);
 		retval = 1;
 		goto error;
-
 	}
+
 
 	if(sendData(sock,cmdlen+4,cmdbuf)) {
 
@@ -295,7 +374,6 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, char *buffer) {
 
 error:
 	shutdownSocket(sock);
-	free(buffer);
 	return retval;
 }
 
@@ -370,17 +448,6 @@ int main(int argc, char **argv) {
 	size_t filesize = ftell(fh);
 	fseek(fh,0,SEEK_SET);
 
-	char *buffer = (char*)malloc(filesize);
-
-	if (buffer == NULL ) {
-		fprintf(stderr,"Insufficient memory\n");
-		fclose(fh);
-		return -1;
-	}
-
-	fread(buffer,1,filesize,fh);
-	fclose(fh);
-
 	char *basename = NULL;
 	if((basename=strrchr(filename,'/'))!=NULL) {
 		basename++;
@@ -439,7 +506,10 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	int res = send3DSXFile(dsaddr.s_addr,basename,filesize,buffer);
+	int res = send3DSXFile(dsaddr.s_addr,basename,filesize,fh);
+
+	fclose(fh);
+
 #ifdef __WIN32__
 	WSACleanup ();
 #endif

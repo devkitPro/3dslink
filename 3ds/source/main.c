@@ -13,7 +13,9 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
+#include <zlib.h>
 
+#define ZLIB_CHUNK (32 * 1024)
 
 #include <3ds.h>
 
@@ -69,12 +71,94 @@ char *executablePath = NULL;
 int cmdlen = 0;
 char *commandline = NULL;
 
+unsigned char in[ZLIB_CHUNK];
+unsigned char out[ZLIB_CHUNK];
+
+//---------------------------------------------------------------------------------
+int decompress(int sock, FILE *fh, size_t filesize) {
+//---------------------------------------------------------------------------------
+  int ret;
+  unsigned have;
+  z_stream strm;
+  size_t chunksize;
+
+    /* allocate inflate state */
+  strm.zalloc = Z_NULL;
+  strm.zfree = Z_NULL;
+  strm.opaque = Z_NULL;
+  strm.avail_in = 0;
+  strm.next_in = Z_NULL;
+  ret = inflateInit(&strm);
+  if (ret != Z_OK) {
+    printf("inflateInit failed.\n");
+    return ret;
+  }
+
+  size_t total = 0;
+  /* decompress until deflate stream ends or end of file */
+  do {
+
+    int len = recvall(sock, &chunksize, 4, 0);
+
+    if (len != 4) {
+      (void)inflateEnd(&strm);
+      printf("\nError getting chunk size\n");
+      return Z_DATA_ERROR;
+    }
+
+    strm.avail_in = recvall(sock,in,chunksize,0);
+
+    if (strm.avail_in == 0) {
+      (void)inflateEnd(&strm);
+      printf("\nremote closed socket.\n");
+      return Z_DATA_ERROR;
+    }
+
+    strm.next_in = in;
+
+    /* run inflate() on input until output buffer not full */
+    do {
+      strm.avail_out = ZLIB_CHUNK;
+      strm.next_out = out;
+      ret = inflate(&strm, Z_NO_FLUSH);
+
+      switch (ret) {
+        case Z_NEED_DICT:
+          ret = Z_DATA_ERROR;     /* and fall through */
+
+        case Z_DATA_ERROR:
+        case Z_MEM_ERROR:
+        case Z_STREAM_ERROR:
+          (void)inflateEnd(&strm);
+          printf("inflate error: %d\n",ret);
+          return ret;
+      }
+
+      have = ZLIB_CHUNK - strm.avail_out;
+
+      if (fwrite(out, 1, have, fh) != have || ferror(fh)) {
+        (void)inflateEnd(&strm);
+        printf("\nfile write error\n");
+        return Z_ERRNO;
+      }
+
+      total += have;
+      printf("\r%zu (%d%%)",total, (100 * total) / filesize);
+      gfxFlushBuffers();
+    } while (strm.avail_out == 0);
+    /* done when inflate() says it's done */
+  } while (ret != Z_STREAM_END);
+
+   /* clean up and return */
+  (void)inflateEnd(&strm);
+  return ret == Z_STREAM_END ? Z_OK : Z_DATA_ERROR;
+}
+
+
 //---------------------------------------------------------------------------------
 int load3DSX(int sock, u32 remote) {
 //---------------------------------------------------------------------------------
 	int len, namelen, filelen;
-	size_t chunksize = 0;
-	uint8_t *filebuffer = NULL;
 
   char filename[256];
 
@@ -112,15 +196,6 @@ int load3DSX(int sock, u32 remote) {
     }
    }
 
-  if (response == 0) {
-    chunksize = filelen/100;
-    filebuffer = malloc(chunksize);
-    if (filebuffer == NULL) {
-      response = -3;
-      close(fd);
-    }
-  }
-
   send(sock,(int *)&response,sizeof(response),0);
 
   close(fd);
@@ -128,51 +203,23 @@ int load3DSX(int sock, u32 remote) {
   FILE *file = fopen(filename,"wb");
   char *writebuffer=malloc(65536);
   setvbuf(file,writebuffer,_IOFBF, 65536);
+
   if (response == 0) {
     printf("transferring %s\n%d bytes.\n", filename, filelen);
 
-    int percent = 0;
-    size_t sizeleft = filelen, target = filelen - chunksize;
-
-    while(sizeleft) {
-      len = recv(sock,filebuffer,chunksize,0);
-
-      if (len == 0) break;
-
-      if (len == -1) {
-        if (errno != EWOULDBLOCK && errno != EAGAIN) {
-          printf("\n");
-          perror(NULL);
-          break;
-        }
-      } else {
-        sizeleft -= len;
-
-        if (sizeleft <= target) {
-          percent++;
-          target -= chunksize;
-
-          if (target<0) target = 0;
-        }
-
-        fwrite(filebuffer,1,len,file);
-        printf("\r%d%%  ",percent);
-        gfxFlushBuffers();
+    if (decompress(sock,file,filelen)==Z_OK) {
+      send(sock,(int *)&response,sizeof(response),0);
+      printf("\ntransferring command line\n");
+      len = recvall(sock,(char*)&cmdlen,4,0);
+      if (cmdlen) {
+        commandline = malloc(cmdlen);
+        len = recvall(sock, commandline, cmdlen,0);
       }
-
-      if ( sizeleft < chunksize) chunksize = sizeleft;
-    }
-
-    printf("\r100%%\n");
-    gfxFlushBuffers();
-    len = recvall(sock,(char*)&cmdlen,4,0);
-    if (cmdlen) {
-      commandline = malloc(cmdlen);
-      len = recvall(sock, commandline, cmdlen,0);
+    } else {
+      response = 1;
     }
   }
 
-  free(filebuffer);
   free(writebuffer);
   fclose(file);
 

@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.61)
-AC_INIT([dstools],[1.0.2],[https://github.com/devkitPro/dstools/issues])
+AC_INIT([3dslink],[0.5.0],[davem@devkitpro.org])
 AC_CONFIG_SRCDIR([src/main.c])
 AM_INIT_AUTOMAKE([1.10])
 
@@ -10,6 +10,14 @@ AC_CANONICAL_BUILD
 AC_CANONICAL_HOST
 
 AC_PROG_CC
+
+PKG_CHECK_MODULES([ZLIB], zlib, [
+  LIBS="$ZLIB_LIBS $LIBS"
+  CFLAGS="$ZLIB_CFLAGS $CFLAGS"
+  AC_DEFINE([HAVE_LIBZ], [1], [Define if using zlib.])
+], [
+  AC_CHECK_LIB(z, compress)
+])
 
 case "$host" in
    *-*-mingw*)
