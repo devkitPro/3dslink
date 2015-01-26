@@ -15,7 +15,7 @@
 
 #include <zlib.h>
 
-#define ZLIB_CHUNK (32 * 1024)
+#define ZLIB_CHUNK (16 * 1024)
 
 #include <3ds.h>
 

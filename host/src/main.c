@@ -20,7 +20,7 @@ typedef uint32_t in_addr_t;
 #include <zlib.h>
 #include <assert.h>
 
-#define ZLIB_CHUNK (32 * 1024)
+#define ZLIB_CHUNK (16 * 1024)
 
 char cmdbuf[3072];
 uint32_t cmdlen=0;
@@ -317,6 +317,8 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 
 	printf("Sending %s, %d bytes\n",name, filesize);
 
+	size_t totalsent = 0, blocks = 0;
+
 
 	do {
 		strm.avail_in = fread(in, 1, ZLIB_CHUNK, fh);
@@ -348,6 +350,9 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 					(void)deflateEnd(&strm);
 					goto error;
 				}
+
+				totalsent += have;
+				blocks++;
 			}
 		} while (strm.avail_out == 0);
 		assert(strm.avail_in == 0);     /* all input will be used */
@@ -355,6 +360,8 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 	} while (flush != Z_FINISH);
 	assert(ret == Z_STREAM_END);        /* stream will be complete */
 	(void)deflateEnd(&strm);
+
+	printf("%u sent (%d%%), %d blocks\n",totalsent, (totalsent * 100)/ filesize, blocks);
 
 	if(recvInt32LE(sock,&response)!=0) {
 		fprintf(stderr,"Failed sending %s\n",name);
