@@ -68,7 +68,6 @@ int recvall(int sock, void *buffer, int size, int flags) {
 char *executablePath = NULL;
 int cmdlen = 0;
 char *commandline = NULL;
-void __appExit();
 
 //---------------------------------------------------------------------------------
 int load3DSX(int sock, u32 remote) {
