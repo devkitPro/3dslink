@@ -305,6 +305,7 @@ void showHelp() {
 	puts("Usage: 3dslink [options] 3dsxfile\n");
 	puts("--help, -h      Display this information");
 	puts("--address, -a   ipv4 address of 3DS");
+	puts("--arg0   , -0   set argv[0]");
 	puts("\n");
 }
 
@@ -312,6 +313,7 @@ void showHelp() {
 int main(int argc, char **argv) {
 //---------------------------------------------------------------------------------
 	char *address = NULL;
+	char *argv0 = NULL;
 
 	if (argc < 2) {
 		showHelp();
@@ -321,6 +323,7 @@ int main(int argc, char **argv) {
 	while(1) {
 		static struct option long_options[] = {
 			{"address",	required_argument,	0,	'a'},
+			{"arg0",	required_argument,	0,	'0'},
 			{"help",	no_argument,		0,	'h'},
 			{0, 0, 0, 0}
 		};
@@ -328,7 +331,7 @@ int main(int argc, char **argv) {
 		/* getopt_long stores the option index here. */
 		int option_index = 0, c;
 
-		c = getopt_long (argc, argv, "a:hk:", long_options, &option_index);
+		c = getopt_long (argc, argv, "a:h0:", long_options, &option_index);
 
 		/* Detect the end of the options. */
 		if (c == -1)
@@ -338,6 +341,9 @@ int main(int argc, char **argv) {
 
 		case 'a':
 			address = optarg;
+			break;
+		case '0':
+			argv0 = optarg;
 			break;
 		case 'h':
 			showHelp();
@@ -384,18 +390,21 @@ int main(int argc, char **argv) {
 		basename = filename;
 	}
 
-	strcpy(&cmdbuf[4],"3dslink:/");
-	strcpy(&cmdbuf[13],basename);
+	if (argv0 == NULL) {
+		strcpy(&cmdbuf[4],"3dslink:/");
+		strcat(&cmdbuf[4],basename);
+	} else {
+		strcpy(&cmdbuf[4],argv0);
+	}
 
-	cmdlen = strlen(&cmdbuf[4]) + 5;
+	cmdlen = strlen(&cmdbuf[4]) + 1;
 
 	for (int index = optind; index < argc; index++) {
 		int len=strlen(argv[index]);
-		if ( (cmdlen + len + 1 ) >= (sizeof(cmdbuf) - 2) ) break;
-		strcpy(&cmdbuf[cmdlen],argv[index]);
+		if ( (cmdlen + len + 5 ) >= (sizeof(cmdbuf) - 2) ) break;
+		strcpy(&cmdbuf[cmdlen+4],argv[index]);
 		cmdlen+= len + 1;
 	}
-	cmdlen -= 4;
 
 	cmdbuf[0] = cmdlen & 0xff;
 	cmdbuf[1] = (cmdlen>>8) & 0xff;
