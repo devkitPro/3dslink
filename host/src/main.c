@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <errno.h>
 
 #ifndef __WIN32__
 #include <sys/socket.h>
