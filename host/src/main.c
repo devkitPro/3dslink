@@ -85,7 +85,7 @@ void timeval_add (struct timeval *result, struct timeval *x, struct timeval *y) 
 }
 
 //---------------------------------------------------------------------------------
-static struct in_addr find3DS() {
+static struct in_addr find3DS(int retries) {
 //---------------------------------------------------------------------------------
     struct sockaddr_in s, remote, rs;
 	char recvbuf[256];
@@ -122,7 +122,7 @@ static struct in_addr find3DS() {
 
 	gettimeofday(&wanted, NULL);
 
-	int timeout = 10;
+	int timeout = retries;
 	while(timeout) {
 		gettimeofday(&now, NULL);
 		if ( timeval_subtract(&result,&wanted,&now)) {
@@ -391,6 +391,7 @@ void showHelp() {
 	puts("Usage: 3dslink [options] 3dsxfile\n");
 	puts("--help, -h      Display this information");
 	puts("--address, -a   ipv4 address of 3DS");
+	puts("--retries, -r   number of times to ping before giving up");
 	puts("--arg0   , -0   set argv[0]");
 	puts("\n");
 }
@@ -400,6 +401,8 @@ int main(int argc, char **argv) {
 //---------------------------------------------------------------------------------
 	char *address = NULL;
 	char *argv0 = NULL;
+	char *endarg = NULL;
+	int retries = 10;
 
 	if (argc < 2) {
 		showHelp();
@@ -409,6 +412,7 @@ int main(int argc, char **argv) {
 	while(1) {
 		static struct option long_options[] = {
 			{"address",	required_argument,	0,	'a'},
+			{"retries",	required_argument,	0,	'r'},
 			{"arg0",	required_argument,	0,	'0'},
 			{"help",	no_argument,		0,	'h'},
 			{0, 0, 0, 0}
@@ -417,7 +421,7 @@ int main(int argc, char **argv) {
 		/* getopt_long stores the option index here. */
 		int option_index = 0, c;
 
-		c = getopt_long (argc, argv, "a:h0:", long_options, &option_index);
+		c = getopt_long (argc, argv, "a:r:h0:", long_options, &option_index);
 
 		/* Detect the end of the options. */
 		if (c == -1)
@@ -427,6 +431,15 @@ int main(int argc, char **argv) {
 
 		case 'a':
 			address = optarg;
+			break;
+		case 'r':
+			errno = 0;
+			retries = strtoul(optarg, &endarg, 0);
+			if (endarg == optarg) errno = EINVAL;
+			if (errno != 0) {
+				perror("--retries");
+				exit(1);
+			}
 			break;
 		case '0':
 			argv0 = optarg;
@@ -498,7 +511,7 @@ int main(int argc, char **argv) {
 	dsaddr.s_addr  =  INADDR_NONE;
 
 	if (address == NULL) {
-		dsaddr = find3DS();
+		dsaddr = find3DS(retries);
 
 		if (dsaddr.s_addr == INADDR_NONE) {
 			printf("No response from 3DS!\n");

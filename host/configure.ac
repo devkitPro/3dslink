@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.61)
-AC_INIT([3dslink],[0.5.0],[davem@devkitpro.org])
+AC_INIT([3dslink],[0.5.1],[davem@devkitpro.org])
 AC_CONFIG_SRCDIR([src/main.c])
 AM_INIT_AUTOMAKE([1.10])
 
