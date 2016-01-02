@@ -12,6 +12,7 @@
 #ifndef __WIN32__
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #else
 #include <winsock2.h>
 typedef int socklen_t;
