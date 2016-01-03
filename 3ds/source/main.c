@@ -23,16 +23,34 @@
 #define SOC_BUFFERSIZE  0x100000
 
 extern void (*__system_retAddr)(void);
-static Handle hbHandle;
+static Handle hbFileHandle;
 void (*callBootloader)(Handle hb, Handle file);
 void (*setArgs)(u32* src, u32 length);
 
-static void launchFile(void)
-{
-	//jump to bootloader
-	callBootloader(0x00000000, hbHandle);
+static u32 argbuffer[0x200];
+static size_t argbuffer_length;
+// ninjhax 1.x
+void (*callBootloader_1x)(Handle hb, Handle file);
+void (*setArgs_1x)(u32* src, u32 length);
+
+static void launchFile_1x(void) {
+  // jump to bootloader
+  callBootloader_1x(0x00000000, hbFileHandle);
 }
 
+// ninjhax 2.0+
+typedef struct {
+  int processId;
+  bool capabilities[0x10];
+}processEntry_s;
+
+void (*callBootloader_2x)(Handle file, u32* argbuf, u32 arglength) = (void*)0x00100000;
+void (*callBootloaderNewProcess_2x)(int processId, u32* argbuf, u32 arglength) = (void*)0x00100008;
+void (*callBootloaderRunTitle_2x)(u8 mediatype, u32* argbuf, u32 argbuflength, u32 tid_low, u32 tid_high) = (void*)0x00100010;
+
+static void launchFile_2x(void) {
+  callBootloader_2x(hbFileHandle, argbuffer, argbuffer_length);
+}
 
 static int set_socket_nonblocking(int fd) {
   int flags;
@@ -235,7 +253,7 @@ int load3DSX(int sock, u32 remote) {
 }
 
 static u32 *SOC_buffer = NULL;
-static FS_archive sdmcArchive;
+static FS_Archive sdmcArchive;
 
 int main(int argc, char **argv) {
   hbInit();
@@ -243,7 +261,7 @@ int main(int argc, char **argv) {
   consoleInit(GFX_TOP,NULL);
 
   SOC_buffer = (u32*)memalign(SOC_ALIGN, SOC_BUFFERSIZE);
-  SOC_Initialize(SOC_buffer, SOC_BUFFERSIZE);
+  socInit(SOC_buffer, SOC_BUFFERSIZE);
 
   struct in_addr host;
   host.s_addr = gethostid();
@@ -318,7 +336,7 @@ int main(int argc, char **argv) {
     gfxSwapBuffers();
   }
 
-  Result ret = SOC_Shutdown();
+  Result ret = socExit();
 
   if(ret != 0) printf("SOC_Shutdown: 0x%08X\n", (unsigned int)ret);
 
@@ -332,17 +350,16 @@ int main(int argc, char **argv) {
     fsExit();
 
     fsInit();
-    sdmcArchive=(FS_archive){0x00000009, (FS_path){PATH_EMPTY, 1, (u8*)""}};
-    FSUSER_OpenFileDirectly(NULL, &hbHandle, sdmcArchive, FS_makePath(PATH_CHAR, executablePath), FS_OPEN_READ, FS_ATTRIBUTE_NONE);
+    sdmcArchive=(FS_Archive){0x00000009, (FS_Path){PATH_EMPTY, 1, (u8*)""}};
+    FSUSER_OpenFileDirectly(&hbFileHandle, sdmcArchive, fsMakePath(PATH_ASCII, executablePath), FS_OPEN_READ, 0);
 
     fsExit();
 
-    //set argv/argc
-    static u32 argbuffer[0x200];
 
     argbuffer[0]=0;
     char *ptr = commandline;
     char *dst = (char*)&argbuffer[1];
+
     while (ptr < commandline + cmdlen) {
       char *arg = ptr;
       strcpy(dst,ptr);
@@ -351,12 +368,26 @@ int main(int argc, char **argv) {
       argbuffer[0]++;
     }
 
-    setArgs(argbuffer, 0x200*4);
+    argbuffer_length = (int)((void*)dst - (void*)argbuffer);
 
-    __system_retAddr = launchFile;
+    // figure out the preferred way of running the 3dsx
+    if(!hbInit()) {
+      // ninjhax 1.x !
+      // grab bootloader addresses
+      HB_GetBootloaderAddresses((void**)&callBootloader_1x, (void**)&setArgs_1x);
+      hbExit();
 
+      // set argv
+      setArgs_1x(argbuffer, sizeof(argbuffer));
+
+      // override return address to homebrew booting code
+      __system_retAddr = launchFile_1x;
+    } else {
+      // ninjhax 2.0+
+      // override return address to homebrew booting code
+      __system_retAddr = launchFile_2x;
+    }
   }
-
   gfxExit();
 
   return 0;
