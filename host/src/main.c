@@ -13,8 +13,10 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netdb.h>
 #else
 #include <winsock2.h>
+#include <ws2tcpip.h>
 typedef int socklen_t;
 typedef uint32_t in_addr_t;
 #endif
@@ -391,7 +393,7 @@ void showHelp() {
 //---------------------------------------------------------------------------------
 	puts("Usage: 3dslink [options] 3dsxfile\n");
 	puts("--help, -h      Display this information");
-	puts("--address, -a   ipv4 address of 3DS");
+	puts("--address, -a   Hostname or IPv4 address of 3DS");
 	puts("--retries, -r   number of times to ping before giving up");
 	puts("--arg0   , -0   set argv[0]");
 	puts("\n");
@@ -520,7 +522,11 @@ int main(int argc, char **argv) {
 		}
 
 	} else {
-		dsaddr.s_addr = inet_addr(address);
+		struct addrinfo *info;
+		if (getaddrinfo(address, NULL, NULL, &info) == 0) {
+			dsaddr = ((struct sockaddr_in*)info->ai_addr)->sin_addr;
+			freeaddrinfo(info);
+		}
 	}
 
 	if (dsaddr.s_addr == INADDR_NONE) {
