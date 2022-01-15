@@ -90,7 +90,7 @@ void timeval_add (struct timeval *result, struct timeval *x, struct timeval *y) 
 //---------------------------------------------------------------------------------
 static struct in_addr find3DS(int retries) {
 //---------------------------------------------------------------------------------
-    struct sockaddr_in s, remote, rs;
+	struct sockaddr_in s, remote, rs;
 	char recvbuf[256];
 	char mess[] = "3dsboot";
 
@@ -101,14 +101,14 @@ static struct in_addr find3DS(int retries) {
 	setsockopt(broadcastSock, SOL_SOCKET, SO_BROADCAST, (char *)&optval, sizeof(optval));
 
 	memset(&s, '\0', sizeof(struct sockaddr_in));
-    s.sin_family = AF_INET;
-    s.sin_port = htons(17491);
-    s.sin_addr.s_addr = INADDR_BROADCAST;
+	s.sin_family = AF_INET;
+	s.sin_port = htons(17491);
+	s.sin_addr.s_addr = INADDR_BROADCAST;
 
 	memset(&rs, '\0', sizeof(struct sockaddr_in));
-    rs.sin_family = AF_INET;
-    rs.sin_port = htons(17491);
-    rs.sin_addr.s_addr = INADDR_ANY;
+	rs.sin_family = AF_INET;
+	rs.sin_port = htons(17491);
+	rs.sin_addr.s_addr = INADDR_ANY;
 
 	int recvSock = socket(PF_INET, SOCK_DGRAM, 0);
 
@@ -264,9 +264,9 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 
 	struct sockaddr_in s;
 	memset(&s, '\0', sizeof(struct sockaddr_in));
-    s.sin_family = AF_INET;
-    s.sin_port = htons(17491);
-    s.sin_addr.s_addr = dsaddr;
+	s.sin_family = AF_INET;
+	s.sin_port = htons(17491);
+	s.sin_addr.s_addr = dsaddr;
 
 	if (connect(sock,(struct sockaddr *)&s,sizeof(s)) < 0 ) {
 		struct in_addr address;
