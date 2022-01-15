@@ -496,7 +496,7 @@ int main(int argc, char **argv) {
 			break;
 		case 'h':
 			showHelp();
-			break;
+			return 0;
 		}
 
 	}
