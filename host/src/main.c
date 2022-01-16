@@ -14,30 +14,119 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netdb.h>
-#else
+#include <poll.h>
+#define closesocket close
+#else // __WIN32__
 #include <winsock2.h>
 #include <ws2tcpip.h>
 typedef int socklen_t;
 typedef uint32_t in_addr_t;
-#endif
+#define SHUT_RD SD_RECEIVE
+#define SHUT_WR SD_SEND
+#define SHUT_RDWR SD_BOTH
+#ifdef EWOULDBLOCK
+#undef EWOULDBLOCK
+#endif // EWOULDBLOCK
+#define EWOULDBLOCK WSAEWOULDBLOCK
+#define poll WSAPoll
+#endif // __WIN32__
 
 #include <zlib.h>
 #include <assert.h>
 
 #define ZLIB_CHUNK (16 * 1024)
 
+#define NETLOADER_COMM_PORT 17491
+
 char cmdbuf[3072];
 uint32_t cmdlen=0;
 
 //---------------------------------------------------------------------------------
-void shutdownSocket(int socket) {
+void shutdownSocket(int socket, int flags) {
 //---------------------------------------------------------------------------------
-#ifdef __WIN32__
-	shutdown (socket, SD_SEND);
-	closesocket (socket);
+	if (flags)
+		shutdown(socket, flags);
+	closesocket(socket);
+}
+
+//---------------------------------------------------------------------------------
+static int setSocketNonblocking(int sock) {
+//---------------------------------------------------------------------------------
+
+#ifndef __WIN32__
+	int flags = fcntl(sock, F_GETFL);
+
+	if (flags == -1) return -1;
+
+	int rc = fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+
+	if (rc != 0) return -1;
 #else
-	close(socket);
+	u_long iMode = 1; // non-blocking
+
+	int rc = ioctlsocket(sock, FIONBIO, &iMode);
+
+	if (rc != NO_ERROR) return -1;
 #endif
+
+	return 0;
+}
+
+//---------------------------------------------------------------------------------
+static int socketError(const char *msg) {
+//---------------------------------------------------------------------------------
+#ifndef _WIN32
+	int ret = errno;
+	if (ret == EAGAIN)
+		ret = EWOULDBLOCK;
+	perror(msg);
+#else
+	int ret = WSAGetLastError();
+	wchar_t *s = NULL;
+	FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+		NULL, ret,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+		(LPWSTR)&s, 0, NULL);
+	fprintf(stderr, "%S\n", s);
+	LocalFree(s);
+	if (ret == WSAEWOULDBLOCK)
+		ret = EWOULDBLOCK;
+#endif
+
+	return ret;
+}
+
+//---------------------------------------------------------------------------------
+int pollSocket(int fd, int events, int timeout) {
+//---------------------------------------------------------------------------------
+#ifndef __WIN32__
+	struct pollfd pfd;
+#else
+	WSAPOLLFD pfd;
+#endif
+
+	pfd.fd = fd;
+	pfd.events = events;
+	pfd.revents = 0;
+
+	int ret = poll(&pfd, 1, timeout);
+	if (ret < 0) {
+		socketError("poll");
+		return -1;
+	}
+
+	if (ret == 0)
+		return -1;
+
+	if (!(pfd.revents & events)) {
+		int err = 0;
+		int len = sizeof(err);
+		getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&err, &len);
+		fprintf(stderr, "socket error 0x%x on poll\n", err);
+		return -1;
+	}
+
+	return 0;
 }
 
 /*---------------------------------------------------------------------------------
@@ -102,12 +191,12 @@ static struct in_addr find3DS(int retries) {
 
 	memset(&s, '\0', sizeof(struct sockaddr_in));
 	s.sin_family = AF_INET;
-	s.sin_port = htons(17491);
+	s.sin_port = htons(NETLOADER_COMM_PORT);
 	s.sin_addr.s_addr = INADDR_BROADCAST;
 
 	memset(&rs, '\0', sizeof(struct sockaddr_in));
 	rs.sin_family = AF_INET;
-	rs.sin_port = htons(17491);
+	rs.sin_port = htons(NETLOADER_COMM_PORT);
 	rs.sin_addr.s_addr = INADDR_ANY;
 
 	int recvSock = socket(PF_INET, SOCK_DGRAM, 0);
@@ -144,8 +233,8 @@ static struct in_addr find3DS(int retries) {
 		}
 	}
 	if (timeout == 0) remote.sin_addr.s_addr =  INADDR_NONE;
-	shutdownSocket(broadcastSock);
-	shutdownSocket(recvSock);
+	shutdownSocket(broadcastSock, 0);
+	shutdownSocket(recvSock, SHUT_RD);
 	return remote.sin_addr;
 }
 
@@ -265,7 +354,7 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 	struct sockaddr_in s;
 	memset(&s, '\0', sizeof(struct sockaddr_in));
 	s.sin_family = AF_INET;
-	s.sin_port = htons(17491);
+	s.sin_port = htons(NETLOADER_COMM_PORT);
 	s.sin_addr.s_addr = dsaddr;
 
 	if (connect(sock,(struct sockaddr *)&s,sizeof(s)) < 0 ) {
@@ -384,9 +473,15 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 
 
 error:
-	shutdownSocket(sock);
+	shutdownSocket(sock, SHUT_WR);
 	return retval;
 }
+
+#ifdef __WIN32__
+static void win32_socket_cleanup(void) {
+	WSACleanup();
+}
+#endif
 
 //---------------------------------------------------------------------------------
 void showHelp() {
@@ -397,6 +492,7 @@ void showHelp() {
 	puts("--retries, -r   number of times to ping before giving up");
 	puts("--arg0   , -0   set argv[0]");
 	puts("--args          set extra argv arguments");
+	puts("--server , -s   start server after completed upload");
 	puts("\n");
 }
 
@@ -452,6 +548,7 @@ int main(int argc, char **argv) {
 	const char *extra_args = NULL;
 	char *endarg = NULL;
 	int retries = 10;
+	int server = 0;
 
 	if (argc < 2) {
 		showHelp();
@@ -460,18 +557,19 @@ int main(int argc, char **argv) {
 
 	while(1) {
 		static struct option long_options[] = {
-			{"address",	required_argument,	0,	'a'},
-			{"retries",	required_argument,	0,	'r'},
-			{"arg0",	required_argument,	0,	'0'},
+			{"address", required_argument, 0, 'a'},
+			{"retries", required_argument, 0, 'r'},
+			{"arg0",    required_argument, 0, '0'},
 			{"args",    required_argument, 0,  1 },
-			{"help",	no_argument,		0,	'h'},
+			{"server",  no_argument,       0, 's'},
+			{"help",    no_argument,       0, 'h'},
 			{0, 0, 0, 0}
 		};
 
 		/* getopt_long stores the option index here. */
 		int option_index = 0, c;
 
-		c = getopt_long (argc, argv, "a:r:h0:", long_options, &option_index);
+		c = getopt_long (argc, argv, "a:r:sh0:", long_options, &option_index);
 
 		/* Detect the end of the options. */
 		if (c == -1)
@@ -493,6 +591,9 @@ int main(int argc, char **argv) {
 			break;
 		case '0':
 			argv0 = optarg;
+			break;
+		case 's':
+			server = 1;
 			break;
 		case 'h':
 			showHelp();
@@ -557,6 +658,7 @@ int main(int argc, char **argv) {
 		printf ("WSAStartup failed\n");
 		return 1;
 	}
+	atexit(&win32_socket_cleanup);
 #endif
 
 	struct in_addr dsaddr;
@@ -587,9 +689,87 @@ int main(int argc, char **argv) {
 
 	fclose(fh);
 
-#ifdef __WIN32__
-	WSACleanup ();
-#endif
+	if (server) {
+		printf("starting server\n");
+
+		struct sockaddr_in serv_addr;
+
+		memset(&serv_addr, '0', sizeof(serv_addr));
+		serv_addr.sin_family = AF_INET;
+		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		serv_addr.sin_port = htons(NETLOADER_COMM_PORT);
+
+		int listenfd = socket(AF_INET, SOCK_STREAM, 0);
+		if (listenfd < 0) {
+			socketError("socket");
+			return EXIT_FAILURE;
+		}
+
+		int rc = bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+		if (rc != 0) {
+			socketError("bind listen socket");
+			shutdownSocket(listenfd, 0);
+			return EXIT_FAILURE;
+		}
+
+		rc = setSocketNonblocking(listenfd);
+		if (rc == -1) {
+			socketError("listen fcntl");
+			shutdownSocket(listenfd, 0);
+			return EXIT_FAILURE;
+		}
+
+		rc = listen(listenfd, 10);
+		if (rc != 0) {
+			socketError("listen");
+			shutdownSocket(listenfd, 0);
+			return EXIT_FAILURE;
+		}
+
+		printf("server active ...\n");
+
+		int datafd = -1;
+
+		while (listenfd != -1 || datafd != -1) {
+			struct sockaddr_in sa_remote;
+
+			if (pollSocket(listenfd >= 0 ? listenfd : datafd, POLLIN, -1))
+				break;
+
+			if (listenfd >= 0) {
+				socklen_t addrlen = sizeof(sa_remote);
+				datafd = accept(listenfd, (struct sockaddr*)&sa_remote, &addrlen);
+
+				if (datafd < 0 && socketError("accept") != EWOULDBLOCK)
+					break;
+
+				if (datafd >= 0) {
+					shutdownSocket(listenfd, 0);
+					listenfd = -1;
+				}
+			} else {
+				char recvbuf[256];
+				int len = recv(datafd, recvbuf, sizeof(recvbuf), 0);
+
+				if (len == 0 || (len < 0 && socketError("recv") != EWOULDBLOCK)) {
+					shutdownSocket(datafd, 0);
+					datafd = -1;
+					break;
+				}
+
+				if (len > 0)
+					fwrite(recvbuf, 1, len, stdout);
+			}
+		}
+
+		if (listenfd >= 0)
+			shutdownSocket(listenfd, 0);
+		if (datafd >= 0)
+			shutdownSocket(datafd, SHUT_RD);
+
+		printf("exiting ... \n");
+	}
+
 	return res;
 }
 
