@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.61)
-AC_INIT([3dslink],[0.6.0],[https://github.com/devkitPro/3dslink/issues])
+AC_INIT([3dslink],[0.6.1],[https://github.com/devkitPro/3dslink/issues])
 AC_CONFIG_SRCDIR([src/main.c])
 AM_INIT_AUTOMAKE([subdir-objects])
 
@@ -22,6 +22,7 @@ PKG_CHECK_MODULES([ZLIB], zlib, [
 case "$host" in
    *-*-mingw*)
       LIBS="$LIBS -lws2_32"
+      CPPFLAGS="-D_WIN32_WINNT=0x600 $CPPFLAGS"
       ;;
 esac
 
