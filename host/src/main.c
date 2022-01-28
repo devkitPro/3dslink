@@ -486,13 +486,15 @@ static void win32_socket_cleanup(void) {
 //---------------------------------------------------------------------------------
 void showHelp() {
 //---------------------------------------------------------------------------------
+	puts( PACKAGE_STRING "\n");
 	puts("Usage: 3dslink [options] 3dsxfile\n");
-	puts("--help, -h      Display this information");
-	puts("--address, -a   Hostname or IPv4 address of 3DS");
-	puts("--retries, -r   number of times to ping before giving up");
-	puts("--arg0   , -0   set argv[0]");
-	puts("--args          set extra argv arguments");
-	puts("--server , -s   start server after completed upload");
+	puts("--help,     -h   Display this information");
+	puts("--address,  -a   Hostname or IPv4 address of 3DS");
+	puts("--retries,  -r   number of times to ping before giving up");
+	puts("--arg0,     -0   set argv[0]");
+	puts("--args           set extra argv arguments");
+	puts("--server  , -s   start server after completed upload");
+	puts("--version , -v   show version.");
 	puts("\n");
 }
 
@@ -562,6 +564,7 @@ int main(int argc, char **argv) {
 			{"arg0",    required_argument, 0, '0'},
 			{"args",    required_argument, 0,  1 },
 			{"server",  no_argument,       0, 's'},
+			{"version", no_argument,       0, 'v'},
 			{"help",    no_argument,       0, 'h'},
 			{0, 0, 0, 0}
 		};
@@ -569,7 +572,7 @@ int main(int argc, char **argv) {
 		/* getopt_long stores the option index here. */
 		int option_index = 0, c;
 
-		c = getopt_long (argc, argv, "a:r:sh0:", long_options, &option_index);
+		c = getopt_long (argc, argv, "a:r:shv0:", long_options, &option_index);
 
 		/* Detect the end of the options. */
 		if (c == -1)
@@ -597,6 +600,9 @@ int main(int argc, char **argv) {
 			break;
 		case 'h':
 			showHelp();
+			return 0;
+		case 'v':
+			puts( PACKAGE_STRING );
 			return 0;
 		}
 
