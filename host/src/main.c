@@ -595,6 +595,9 @@ int main(int argc, char **argv) {
 		case '0':
 			argv0 = optarg;
 			break;
+		case 1:
+			extra_args = optarg;
+			break;
 		case 's':
 			server = 1;
 			break;
