@@ -492,54 +492,9 @@ void showHelp() {
 	puts("--address,  -a   Hostname or IPv4 address of 3DS");
 	puts("--retries,  -r   number of times to ping before giving up");
 	puts("--arg0,     -0   set argv[0]");
-	puts("--args           set extra argv arguments");
 	puts("--server  , -s   start server after completed upload");
 	puts("--version , -v   show version.");
 	puts("\n");
-}
-
-//---------------------------------------------------------------------------------
-static int addExtraArgs(int len, char *buf, const char *extra_args) {
-//---------------------------------------------------------------------------------
-
-	if (NULL==extra_args) return len;
-
-
-	int extra_len = strlen(extra_args);
-
-	char *dst = &buf[len];
-	const char *src = extra_args;
-
-	do {
-		int c;
-
-		do {
-			c = *src++;
-			extra_len--;
-		} while (c ==' ' && extra_len >= 0);
-
-		if (c == '\"' || c == '\'') {
-			int quote = c;
-			do {
-				c = *src++;
-				if (c != quote) *dst++ = c;
-				extra_len--;
-			} while (c != quote && extra_len >= 0);
-
-			*dst++ = '\0';
-
-			continue;
-		}
-		do {
-			*dst++ = c;
-			extra_len--;
-			c = *src++;
-		} while (c != ' ' && extra_len >= 0);
-
-		*dst++ = '\0';
-	} while (extra_len >= 0);
-
-	return dst - buf;
 }
 
 //---------------------------------------------------------------------------------
@@ -547,7 +502,6 @@ int main(int argc, char **argv) {
 //---------------------------------------------------------------------------------
 	char *address = NULL;
 	char *argv0 = NULL;
-	const char *extra_args = NULL;
 	char *endarg = NULL;
 	int retries = 10;
 	int server = 0;
@@ -650,8 +604,6 @@ int main(int argc, char **argv) {
 		strcpy(&cmdbuf[cmdlen+4],argv[index]);
 		cmdlen+= len + 1;
 	}
-
-	cmdlen = addExtraArgs(cmdlen, &cmdbuf[4], extra_args);
 
 	cmdbuf[0] = cmdlen & 0xff;
 	cmdbuf[1] = (cmdlen>>8) & 0xff;
