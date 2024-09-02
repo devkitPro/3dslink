@@ -590,7 +590,7 @@ int main(int argc, char **argv) {
 	}
 
 	if (argv0 == NULL) {
-		strcpy(&cmdbuf[4],"3dslink:/");
+		strcpy(&cmdbuf[4],"sdmc:/3ds/");
 		strcat(&cmdbuf[4],basename);
 	} else {
 		strcpy(&cmdbuf[4],argv0);
