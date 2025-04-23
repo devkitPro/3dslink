@@ -663,6 +663,14 @@ int main(int argc, char **argv) {
 			return EXIT_FAILURE;
 		}
 
+		int enable = 1;
+		int ret = setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
+		if (ret == -1) {
+			socketError("set SO_REUSEADDR on listen socket");
+			shutdownSocket(listenfd, 0);
+			return EXIT_FAILURE;
+		}
+
 		int rc = bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
 		if (rc != 0) {
 			socketError("bind listen socket");
